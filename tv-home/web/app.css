@@ -2070,3 +2070,17 @@ html.dock-mac.theme-night .app.hop { animation: dock-hop 520ms 1; }
 .theme-night .prayer { -webkit-backdrop-filter: blur(1.75rem) saturate(150%); backdrop-filter: blur(1.75rem) saturate(150%); }
 .glass-lite.theme-night .prayer, .lighter .prayer { -webkit-backdrop-filter: none; backdrop-filter: none; background: rgba(14, 16, 34, 0.58); }
 .shelf-head .status:empty { display: none; }
+
+/* Local fork: the same depth with cheaper shadows. The Night look's glass panels and focused tiles
+   used 2.5 to 3.75rem blurs, redrawn on every move on a 2020 MediaTek box; half the blur at a little
+   more opacity keeps the lift and draws far faster. Scenes, glass clock and colours are unchanged. */
+.theme-night .people, .theme-night .qbtn, .theme-night .grid, .theme-night .ncard, .theme-night .prayer {
+  box-shadow: inset 0 0 0 0.0625rem rgba(255, 210, 220, 0.16), inset 0 0.0625rem 0 rgba(255, 220, 230, 0.14), 0 0.75rem 1.5rem rgba(0, 0, 0, 0.32);
+}
+.ncard.focus { box-shadow: 0 0 0 0.1875rem #fff, 0 0.75rem 1.5rem rgba(0, 0, 0, 0.5); }
+.theme-night .app.focus .face { box-shadow: 0 0 0 0.25rem #fff, 0 0.75rem 1.5rem rgba(0, 0, 0, 0.45); }
+html.glass {
+  --glass-edge: inset 0 0 0 0.0625rem rgba(255, 255, 255, 0.26), inset 0 0.125rem 0.0625rem -0.0625rem rgba(255, 255, 255, 0.6),
+    inset 0 -0.0625rem 0 rgba(255, 255, 255, 0.1), 0 0.75rem 1.5rem rgba(0, 0, 0, 0.34);
+}
+.ncard, .theme-night .app .face { will-change: transform; }
