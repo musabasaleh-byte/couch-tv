@@ -38,6 +38,15 @@ android {
         }
     }
     buildFeatures { buildConfig = true }
+    // Local fork (prayer times, aerials): -PlocalRev=N builds "<upstream>.N" with versionCode
+    // upstream*100+N, so each of our rebuilds of one upstream release updates the last one, and the
+    // next upstream release (its versionCode*100) is newer again. Tags: v<upstream>.<N>.
+    defaultConfig {
+        (project.findProperty("localRev") as String?)?.trim()?.toIntOrNull()?.takeIf { it in 0..99 }?.let { rev ->
+            versionCode = (versionCode ?: 0) * 100 + rev
+            versionName = "$versionName.$rev"
+        }
+    }
     // Test builds: when COUCHTV_KEYSTORE names a keystore (a debug-style key, alias androiddebugkey,
     // password android), release builds are signed with it, so one test build can update the last (#4).
     val fixedKey = System.getenv("COUCHTV_KEYSTORE")?.let { file(it) }?.takeIf { it.isFile }

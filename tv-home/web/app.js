@@ -1101,6 +1101,7 @@
   function startVideo() {
     var v = $("bgvid"), root = document.documentElement;
     if (!VIDEO_ON) return;
+    if (AERIALS_RE.test(VIDEO_URL)) { startAerials(v, root); return; }
     if (v.getAttribute("src") !== VIDEO_URL) {
       root.classList.remove("has-video");
       v.onplaying = function () { clearTimeout(vidTimer); root.classList.add("has-video"); };
@@ -1109,6 +1110,45 @@
       clearTimeout(vidTimer);
       vidTimer = setTimeout(function () { if (!root.classList.contains("has-video")) stopVideo(); }, 20000);
     }
+    var p = v.play();
+    if (p && p.catch) p.catch(function () {});
+  }
+  // Aerials (local fork): home.video_url ending in /tv/aerials/ plays the Apple TV style clips the
+  // household copied onto this TV, one after another in a shuffled order, instead of one looping clip.
+  // The app lists them at that address and streams each from the TV's own storage.
+  var AERIALS_RE = /\/tv\/aerials\/$/;
+  var aerials = null, aerialAt = 0;
+  function startAerials(v, root) {
+    if (aerials === null) {
+      aerials = [];
+      fetch(VIDEO_URL, { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (list) {
+        aerials = (Array.isArray(list) ? list : []).filter(function (n) { return typeof n === "string"; });
+        for (var i = aerials.length - 1; i > 0; i--) { var j = Math.floor(Math.random() * (i + 1)), t = aerials[i]; aerials[i] = aerials[j]; aerials[j] = t; }
+        if (!aerials.length) { stopVideo(); return; }
+        aerialAt = 0;
+        if (VIDEO_ON && !document.hidden) playAerial(v, root);
+      }).catch(stopVideo);
+      return;
+    }
+    if (!aerials.length) return;
+    if (!v.getAttribute("src")) { playAerial(v, root); return; }
+    var p = v.play();
+    if (p && p.catch) p.catch(function () {});
+  }
+  function playAerial(v, root) {
+    v.loop = false;
+    v.removeAttribute("loop");
+    v.onplaying = function () { clearTimeout(vidTimer); root.classList.add("has-video"); };
+    v.onended = function () { aerialAt = (aerialAt + 1) % aerials.length; playAerial(v, root); };
+    v.onerror = function () {
+      aerials.splice(aerialAt, 1);
+      if (!aerials.length) { stopVideo(); return; }
+      aerialAt = aerialAt % aerials.length;
+      playAerial(v, root);
+    };
+    v.src = VIDEO_URL + encodeURIComponent(aerials[aerialAt]);
+    clearTimeout(vidTimer);
+    vidTimer = setTimeout(function () { if (!root.classList.contains("has-video")) stopVideo(); }, 20000);
     var p = v.play();
     if (p && p.catch) p.catch(function () {});
   }

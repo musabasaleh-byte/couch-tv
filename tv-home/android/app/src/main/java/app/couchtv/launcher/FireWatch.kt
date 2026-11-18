@@ -83,7 +83,7 @@ class FireWatch : AccessibilityService() {
         // window event is never seen, and a Home press then changes nothing (the Google home is
         // already in front). Other Google TVs are left alone: one can start on an HDMI input or
         // live TV, and that must never be covered.
-        if ((android.os.Build.MANUFACTURER.equals("Amazon", ignoreCase = true) || TclPlaceholderInput.isTcl()) &&
+        if ((android.os.Build.MANUFACTURER.equals("Amazon", ignoreCase = true) || TclPlaceholderInput.isTcl() || isGoogleStreamer()) &&
             SystemClock.elapsedRealtime() < BOOT_WINDOW_MS && !CrashGuard.standingAside(this)) {
             Log.i("couchtv.firewatch", "bound just after a restart: putting couch-tv in front")
             runCatching { startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
@@ -246,7 +246,11 @@ class FireWatch : AccessibilityService() {
         private fun isNokiaMy() = Build.MANUFACTURER.equals("My", ignoreCase = true)
         /** Skyworth 4K Google TV Stick (Android 14): the same quick Home press race left the Google home up (#256). */
         private fun isSkyworth() = Build.MANUFACTURER.equals("SkyworthDigital", ignoreCase = true)
-        private fun catchesHomeKey() = isXiaomi() || isKtc() || isSony() || isNokiaMy() || isSkyworth()
+        /** Google TV Streamer (local fork): catch Home itself, so the Google home never flashes up on a press. It has no
+         *  HDMI input or live TV to cover, so it also goes to couch-tv once right after a restart. */
+        private fun isGoogleStreamer() = Build.MANUFACTURER.equals("Google", ignoreCase = true) &&
+            Build.MODEL.equals("Google TV Streamer", ignoreCase = true)
+        private fun catchesHomeKey() = isXiaomi() || isKtc() || isSony() || isNokiaMy() || isSkyworth() || isGoogleStreamer()
         const val GOOGLE_TV_HOME = "com.google.android.apps.tv.launcherx"
         const val ANDROID_TV_HOME = "com.google.android.tvlauncher"
         /** Bell's Fibe TV app (Bell Streamer, Canada): its MainTvActivity is the box's HOME, and also its live TV. */

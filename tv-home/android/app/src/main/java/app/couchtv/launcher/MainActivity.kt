@@ -421,6 +421,7 @@ class MainActivity : Activity() {
 
             override fun shouldInterceptRequest(view: WebView, req: WebResourceRequest): WebResourceResponse? {
                 val u = req.url
+                if (u.host == OFFLINE_HOST && (u.path ?: "").startsWith("/tv/aerials/")) return aerialFile(u.path!!, req.requestHeaders)
                 if (u.host == OFFLINE_HOST) return offlineFile(u.path ?: "")
                 if (u.host != "tvos.invalid") return null
                 if (u.pathSegments.firstOrNull() == "webdata") {
@@ -589,6 +590,55 @@ class MainActivity : Activity() {
         val f = java.io.File(offlineDir, rel)
         if (!f.isFile) return notFound()
         return WebResourceResponse(type, if (text) "utf-8" else null, f.inputStream())
+    }
+
+    // ---------------------------------------------------------------- the aerials (local fork)
+
+    /** Apple TV style aerial clips the household copied onto this TV (adb push into the app's own
+     *  external files folder, aerials/). "/tv/aerials/" lists them as JSON; "/tv/aerials/<name>" plays
+     *  one, with byte ranges so the video element can stream it. Names only: no folders, no "..". */
+    private val aerialDir get() = getExternalFilesDir("aerials")
+
+    private fun aerialFile(path: String, headers: Map<String, String>?): WebResourceResponse {
+        val name = path.removePrefix("/tv/aerials/")
+        val dir = aerialDir
+        val none = { WebResourceResponse("text/plain", "utf-8", 404, "Not found", emptyMap(), ByteArrayInputStream(ByteArray(0))) }
+        if (dir == null) return none()
+        if (name.isEmpty()) {
+            val list = dir.listFiles { f -> f.isFile && Regex("(?i).+\\.(mov|mp4)").matches(f.name) }
+                ?.map { it.name }?.sorted() ?: emptyList()
+            val json = org.json.JSONArray(list).toString().toByteArray(Charsets.UTF_8)
+            return WebResourceResponse("application/json", "utf-8", 200, "OK", mapOf("Cache-Control" to "no-store"), ByteArrayInputStream(json))
+        }
+        if (name.contains('/') || name.contains("..") || !Regex("(?i)[A-Za-z0-9_.-]{1,200}\\.(mov|mp4)").matches(name)) return none()
+        val f = java.io.File(dir, name)
+        if (!f.isFile) return none()
+        val size = f.length()
+        val range = headers?.entries?.firstOrNull { it.key.equals("Range", true) }?.value
+        val m = range?.let { Regex("bytes=(\\d+)-(\\d*)").find(it) }
+        val start = m?.groupValues?.get(1)?.toLongOrNull() ?: 0L
+        val end = m?.groupValues?.get(2)?.toLongOrNull()?.coerceAtMost(size - 1) ?: (size - 1)
+        if (start >= size || end < start) {
+            return WebResourceResponse("video/mp4", null, 416, "Range Not Satisfiable", mapOf("Content-Range" to "bytes */$size"), ByteArrayInputStream(ByteArray(0)))
+        }
+        val len = end - start + 1
+        val input = java.io.RandomAccessFile(f, "r").let { raf ->
+            raf.seek(start)
+            object : java.io.InputStream() {
+                var left = len
+                override fun read(): Int = if (left <= 0) -1 else raf.read().also { if (it >= 0) left-- }
+                override fun read(b: ByteArray, off: Int, n: Int): Int {
+                    if (left <= 0) return -1
+                    val r = raf.read(b, off, minOf(n.toLong(), left).toInt())
+                    if (r > 0) left -= r
+                    return r
+                }
+                override fun close() = raf.close()
+            }
+        }
+        val hdrs = mapOf("Accept-Ranges" to "bytes", "Content-Length" to len.toString(), "Cache-Control" to "no-store") +
+            (if (m != null) mapOf("Content-Range" to "bytes $start-$end/$size") else emptyMap())
+        return WebResourceResponse("video/mp4", null, if (m != null) 206 else 200, if (m != null) "Partial Content" else "OK", hdrs, input)
     }
 
     private fun mimeFor(ext: String): String {

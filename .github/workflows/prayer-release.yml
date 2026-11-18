@@ -1,0 +1,91 @@
+# Local fork: rebuilds each new couch-tv release with this fork's own changes (prayer times, aerials,
+# the Google TV Streamer Home key) and publishes it here, signed with this fork's own key, so the TV
+# offers it in Home settings, Updates. Daily, and by hand (Actions, Prayer release, Run workflow).
+#   - the fork's changes are the commits on this branch after the tag in .prayer-base;
+#   - they are replayed on the newest Seagey/couch-tv release; a clash stops the run (nothing published);
+#   - tag v<upstream>.<rev> (v0.13.0.1), versionCode upstream*100+rev, so every one updates the last;
+#   - the secret PRAYER_KEYSTORE (base64 of the keystore) signs it. Without it nothing is published.
+# The built-in settings are config.example.json: the TV keeps its own (apply.sh) across updates.
+name: Prayer release
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+    inputs:
+      rev:
+        description: "Our revision on top of the upstream release (1, 2, ...)"
+        default: "1"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: prayer-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Which release to build
+        id: which
+        run: |
+          up=$(curl -fsSL https://api.github.com/repos/Seagey/couch-tv/releases/latest | python3 -c 'import json,sys;print(json.load(sys.stdin)["tag_name"])')
+          rev="${{ github.event.inputs.rev || '1' }}"
+          case "$rev" in [0-9]|[1-9][0-9]) ;; *) echo "rev must be 0-99"; exit 1 ;; esac
+          tag="$up.$rev"
+          echo "upstream $up, ours $tag"
+          if gh release view "$tag" > /dev/null 2>&1; then
+            echo "skip=1" >> "$GITHUB_OUTPUT"
+            echo "$tag is already published"
+          fi
+          echo "up=$up" >> "$GITHUB_OUTPUT"; echo "rev=$rev" >> "$GITHUB_OUTPUT"; echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Replay this fork's changes on the upstream release
+        if: steps.which.outputs.skip != '1'
+        run: |
+          git config user.name "prayer-release"; git config user.email "actions@users.noreply.github.com"
+          base=$(cat .prayer-base)
+          git remote add upstream https://github.com/Seagey/couch-tv.git
+          git fetch -q upstream "refs/tags/${{ steps.which.outputs.up }}:refs/tags/${{ steps.which.outputs.up }}" "refs/tags/$base:refs/tags/$base"
+          git format-patch -q -o "$RUNNER_TEMP/patches" "$base"..HEAD
+          git checkout -q -b build "${{ steps.which.outputs.up }}"
+          git am -3 "$RUNNER_TEMP"/patches/*.patch
+
+      - uses: actions/setup-java@v4
+        if: steps.which.outputs.skip != '1'
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Signing key
+        if: steps.which.outputs.skip != '1'
+        env:
+          PRAYER_KEYSTORE: ${{ secrets.PRAYER_KEYSTORE }}
+        run: |
+          [ -n "$PRAYER_KEYSTORE" ] || { echo "Add the PRAYER_KEYSTORE secret first"; exit 1; }
+          printf '%s' "$PRAYER_KEYSTORE" | base64 -d > "$RUNNER_TEMP/prayer.keystore"
+          echo "COUCHTV_KEYSTORE=$RUNNER_TEMP/prayer.keystore" >> "$GITHUB_ENV"
+
+      - name: Build the TV home
+        if: steps.which.outputs.skip != '1'
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-34" "build-tools;34.0.0" > /dev/null
+          tv-home/android/gradlew -p tv-home/android --no-daemon -q assembleRelease \
+            "-PconfigJson=$PWD/config.example.json" "-PupdateRepo=${{ github.repository }}" "-PlocalRev=${{ steps.which.outputs.rev }}"
+          mkdir -p dist && cp tv-home/android/app/build/outputs/apk/release/app-release.apk dist/couch-tv-home.apk
+          "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --print-certs dist/couch-tv-home.apk | grep -i "SHA-256"
+
+      - name: Publish
+        if: steps.which.outputs.skip != '1'
+        run: |
+          gh release create "${{ steps.which.outputs.tag }}" dist/couch-tv-home.apk --target "${{ github.sha }}" \
+            --title "${{ steps.which.outputs.tag }} (prayer times)" \
+            --notes "couch-tv ${{ steps.which.outputs.up }} with this fork's changes: prayer times, aerials, Google TV Streamer Home key."
